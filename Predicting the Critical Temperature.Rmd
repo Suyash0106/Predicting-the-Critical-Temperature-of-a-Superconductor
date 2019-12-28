@@ -1,0 +1,912 @@
+---
+title: "FIT5149 S2 2019 Assessment 1 Predicting the Critical Temperature of a Superconductor"
+highlight: tango
+date: "15 September 2019"
+output:
+  pdf_document: null
+  number_sections: yes
+  word_document: default
+  fontsize: 14pt
+keep_tex: yes
+includes:
+  in_header: styles.sty
+toc: yes
+---
+  
+  ```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+\section*{Student information}
+
+**Family Name:** Sathe  
+**Given Name:** Suyash  
+**Student ID:** 29279208  
+**Student email:** ssat0005@student.monash.edu   
+
+
+\newpage 
+\section*{Programming Language}
+
+* R 3.5.1 in Jupyter Notebook
+
+\section*{Libraries}
+
+* **psych:** Statistical Computation and multivariate analysis.  
+* **caret:** Model training workflow.  
+* **tidyverse:** Manipulating and visualizing data.  
+* **dplyr:** Data Manipulation.  
+* **ggplot2:** Graphical analysis of data.  
+* **GGally:** Extend GGplot2 to reduce the complexity of combining geometric objects with transformed data.  
+* **randomForest:** Implement Breiman's random forest algorithm for regression.  
+* **gbm:** Implement gradient boosted regression models.  
+
+\newpage
+\section{Introduction}
+
+The objective of this project is to analyse the multivariate dataset of superconductors and predict the critical temperature given the critical properties of the superconductor’s materials. The Critical temperature of a conductor is the temperature below which the material has zero electrical resistance. This temperature is dependent on various chemical properties of a material. 
+
+In this assignment, the dataset containing 21,623 records of superconducting materials corresponding to 80 chemical properties (features) was explored and analysed to obtain the best set of features that are crucial for predicting the critical temperature of a superconductor.  In the pre-processing step, the filter method was used to eliminate the irrelevant features, and Pearson’s correlation coefficient was used to quantify the linear relationship between two continuous variables. 
+
+After filtering the set of features, Recursive Feature Elimination was used to obtain the best subset of features. This final set of features was then utilised to train 3 different models including the linear regression model, random forest model and gradient boosted model, and the performance of these models was evaluated based on R-squared (R2) value and RMSE score. The best model was selected based on the highest R2 or lowest RMSE value. After comparing the models, the best model was utilised to identify and describe the key properties for predicting the critical temperature of a superconductor.
+
+\newpage
+\section{Data Exploration}
+
+## Libraries and packages
+
+* Load the required set of libraries and packages.
+
+
+```{r}
+# load the library.
+
+require(psych)
+require(caret)
+require(tidyverse)
+require(dplyr)
+require(ggplot2)
+require(GGally)
+require(randomForest)
+require(gbm)
+```
+
+
+* To ensure the simulation of random objects, set the seed value to a random value.
+
+
+```{r}
+# ensure the results are repeatable
+set.seed(798)
+```
+
+## Read the Datasets
+
+* There are two datasets provided as a part of these assignment. 
+* The "train.csv" contains the statistical properties of the superconductors, and the "unique_m.csv"" contains the elements present in each superconductor. 
+
+
+```{r}
+# Read the complete dataset
+data <- read.csv('train.csv', header = TRUE)
+
+# Read the dataset of elements
+elements <- read.csv('unique_m.csv', header = TRUE)
+```
+
+
+* Since the *critical temperature* of a superconductor may also depend on the composition of the material, we are combining the two datasets.
+* Using this, we can analyse the dependency of *critical temperature* on the chemical properties as well as the chemical composition of the super conductor.
+
+
+```{r}
+# Combine both the datasets
+combined_data <- cbind(data, elements)
+
+# Check the first few elements of the dataset
+head(combined_data)
+```
+
+
+## Overview of the dataset
+
+* Check the dimensionality of the dataset. This dataset has 21263 rows and 170 columns, i.e., this combined dataset has 170 features.
+
+```{r}
+# Check the dimensions of the dataset
+dim(combined_data)
+```
+
+
+```{r}
+# Check for null values
+sum(is.na(combined_data))
+```
+
+* Checking for null values in the dataset, there are 0 null values in this dataset.
+
+```{r}
+# Check for null values
+sum(is.na(combined_data))
+```
+
+* Get an overview of the structure of this dataset.
+
+```{r}
+# Check the structure of the dataset
+str(combined_data)
+```
+
+## Train and Test Data
+
+* The combined dataset is divided into train and test data.
+* The train dataset contains 80% records whereas test dataset contains 20% records.
+* The train dataset is used to train the models where as the test dataset is used for validating the performance of the model.
+* Here, we are not using cross validation since it will be computationally expensive to perform k-fold cross validation on 21263 records.
+
+```{r}
+# Indices for training data (80%)
+train_indices <- round(0.80*dim(combined_data)[1])
+
+# Training dataset
+train <- combined_data[0:train_indices,]
+
+# Testing dataset
+test <- combined_data[train_indices:dim(combined_data)[1],]
+
+# Dimensions of train data
+dim(train)
+```
+
+## Unique features
+
+* We will use the training dataset for further exploration of data.
+* Identify the unique features in the dataset and print them.
+* The dataset contains 169 unique features.This indicates there is atleast 1 redundant feature. 
+* We will identify the redundant features in the feature reduction step and remove them for further analysis and model implementation. 
+
+```{r}
+# Get the unique features from the dataset
+unique_features <- apply(train, 2, function(x) length(unique(x)))
+                         
+#print the unique features 
+cat("The numbers of unique values for each attribute are:",length(unique_features), "\n\n")   
+
+# Get a headshot of unique features
+head(sort(unique_features, decreasing = T))
+```
+
+## Feature variance
+
+* Get an overview of variance associated with teh features.
+* We are going to use the var function to check the variance of the different features.
+
+```{r}
+# Drop the last column (Materials)
+train <- train[-dim(train)[2]]
+
+# Check the variance of all features. Sort in descending order
+variance_of_features  <- as.data.frame(as.table(sort(apply(train, 2, var), decreasing = T)))
+names(variance_of_features) <- c("Feature", "Variance")
+head(variance_of_features)
+```
+
+* Get the list of features having zero variance.
+* It can be observed that the variance of the elements (or features) He, Ar, Ne, Xe, Kr, Xe, Pm, Po and At is zero. 
+* If we look at the dataset their value is 0 for all the super conductors which indicates that they are not present in any super conductors.
+
+```{r}
+# Let's find which variables have zero variance.
+zero_variance <- which(apply(train, 2, var) == 0)
+
+cat("Features whose variance is 0 are:\n\n")
+print(zero_variance)
+```
+
+## Highly correlated features
+
+* The check_correlation() function is created to identify the highly correlated features in the dataset. This function takes the dataset and the correlation cutoff as input and print the features whose correlation is greater than the threshold.
+* In this project, the correlation cutoff for highly correlated features is set to 0.8.
+* The training dataset is passed to the check_correlation() function and the cutoff correlation value is set to 0.8. The output of this function is the list of features whose correlation is greater that 0.8.
+
+```{r}
+
+# Function to print the correlated features whose correlation > cutoff
+check_correlation <- function(data, cutoff){
+  cor_matrix <- cor(data)
+
+  for (i in 1:nrow(cor_matrix)){
+    correlations <-  which((abs(cor_matrix[i,i:ncol(cor_matrix)]) > cutoff) & (cor_matrix[i,i:ncol(cor_matrix)] != 1))
+  
+    if(length(correlations)> 0){
+      lapply(correlations,FUN =  function(x) (cat(paste(colnames(data)[i], ":",colnames(data)[x]), "\n")))
+     
+    }
+  }
+}
+
+#check_correlation(dplyr::select(train, -zero_variance), 0.8)
+```
+
+* Since the output of this function is a very big list, the following is the  head of 10 highly correlated features:  
+  + number_of_elements : entropy_atomic_mass  
+  + number_of_elements : wtd_entropy_atomic_mass   
+  + number_of_elements : entropy_fie    
+  + number_of_elements : entropy_atomic_radius   
+  + number_of_elements : wtd_entropy_atomic_radius     
+  + number_of_elements : entropy_Density     
+  + number_of_elements : entropy_ElectronAffinity   
+  + number_of_elements : entropy_FusionHeat   
+  + number_of_elements : wtd_entropy_FusionHeat   
+  + number_of_elements : entropy_Valence   
+
+
+## Features correlated to the target variable
+
+* The cor() function is used to get the correlation matrix having correlation between different features.
+* This correlation matrix is used to get the correlation of features with the critical temperature.
+* This matrix is further used to filter the features whose correlation with the "critical temp" is less that 0.1, i.e., the features whose correlation with the target variable is very low.
+* There are 70 features whose correlation with the "critical temp" is less than 0.1.
+
+
+```{r}
+# Create a correlation matrix
+corr_matrix <- cor(dplyr::select(train, -zero_variance))
+
+# Create a dataframe that contains the correlation of features with the critical temperature
+corr_df <- as.data.frame(corr_matrix[, "critical_temp"])
+
+# Set the name of the column to "critical_temp"
+names(corr_df) <- c("critical_temp")
+
+# Add a column to store the absolute value of the "critical_temp" correlation coefficient
+corr_df['absolute_correlation'] = abs(corr_df[,"critical_temp"])
+
+# Get the features whose absolute value of correlation with the critical_temp is < 0.1
+correlated_features_df <- as.data.frame(t(corr_df[corr_df[,"absolute_correlation"] < 0.1,]))
+
+# Get the names of those features
+names_of_features <- names(correlated_features_df)
+
+# Number of features whose correlation with the critical_temp is < 0.1
+length(names_of_features)
+
+```
+
+* Following is the list of features whose correlation with the *Critical Temperature* is less than 0.1.
+
+```{r}
+cat("Features whose correlation with the critical_temp is < 0.1 are:\n\n")
+cat(names_of_features)
+```
+
+\newpage
+\section{Feature Reduction}
+
+# Filter Method
+
+In this section, we are reducing the set of features from the training set in order to reduce the data redundancy as well as improve the performance of the machine learning algorithm. The primary objective is to reduce the complexity of a model and make it easier to interpret.
+Feature selection also improves the accuracy of a model and also reduces overfitting.   
+
+Filter method is used in this step and features are selected on the basis of their statistical scores and correlation with the target variable. After reducing the set of features using the filter method, wrapper method using stepwise selection approach is used to obtain the best subset of features to be used in the model.
+
+## Drop the duplicate columns
+
+* To reduce the redundancy in the dataset,the first step is to remove the duplicate features.
+* The following code identifies the duplicated columns in the dataset and removes them.
+* duplicated(t(train)) gives the list of duplicated features. These features are removed from the dataset.
+* It is observed that there were 10 duplicated features in the dataset.
+
+```{r}
+# Drop the duplicate columns from the dataset
+train <- train[!duplicated(t(train))]
+
+# Check the dimensions of the updated dataset
+dim(train)
+```
+
+## Remove columns with near zero or near zero variance
+
+* Some variables do not contain much information. For example:
+    + Constants: They do not have any variance in their values.
+    + Nearly constant features: They have low variation in values.
+
+* In the data exploration step, we have identified that the elements (or features) He, Ar, Ne, Xe, Kr, Xe, Pm, Po and At have 0 variance. These features are removed from our training dataset.
+* The new dataset is reduced to 154 features.
+
+```{r}
+# Remove features that have 0 variance
+train_1 <- select(train, -zero_variance)
+
+# Check the dimensions of the updated dataset
+dim(train_1)
+```
+
+* Features that have very low variance are nearly constant and do not contain substantial information. Since they contain less information, they tend not to have any impact on our model. 
+* Hence, extremely low variance features are removed from the dataset prior to modelling.
+* The nearZeroVar() function from the *caret* library is used to remove the the features from the dataset that have extremely low variance.
+* It can be observed that dimensionality of the dataset is reduced significantly to 85 thereby removing 69 features.
+
+```{r}
+
+# Identify near zero variance predictors: remove_cols
+remove_cols <- nearZeroVar(train_1, names = TRUE)
+
+# Get all column names from the train set: all_cols
+all_cols <- names(train_1)
+
+# Remove from data: train set
+train_2 <- train_1[ , setdiff(all_cols, remove_cols)]
+
+# Check the dimensions of the updated dataset
+dim(train_2)
+
+```
+
+## Remove highly correlated features
+
+* To improve the performance of the model and reduce it's complexity, the highly correlated features are identified using the findCorrelation() function.
+* This function searches through a correlation matrix and returns a vector of integers corresponding to columns to remove pair-wise correlations.
+* Since highly correlated features impart same information to the model and can be redundant, these features are removed from the dataset to improve the interpretability of the model.
+* In this part, the features that have correlation greater than 80% are removed.
+* Following is the list of features whose correlation is greater than 0.8 and should be removed from our list. The pair-wise list is identified in the data exploration.
+
+```{r}
+# Create a correlation matrix
+corr_matrix <- cor(train_2)
+
+# Get the list of features that are highly corrrelated
+highly_correlated_features <- findCorrelation(corr_matrix, cutoff=0.8, names = T)
+
+cat("List of redundant features:\n\n")
+print(highly_correlated_features)
+```
+
+
+* Check the dimensionality of the dataset after removing highly correlated features.
+* The updated list of features contain 34 columns. 
+
+```{r}
+# Remove highly correlated features
+train_3 <- dplyr::select(train_2, -highly_correlated_features)
+
+# Check the dimensions of the updated dataset
+dim(train_3)
+```
+
+## Drop features that have low correlation with the target variable
+
+* Feature having low correlation with the target variable do not improve the prediction capability of the model.
+* This implies that there is no information in the feature that predicts the target.
+* The following code identifies the features whose correlation with the "Critical temperature" is greater than 0.1.
+
+```{r}
+
+# Create a new correlation matrix
+corr_matrix_2 <- round(cor(train_3), 2)
+
+# Create a dataframe that contains the correlation of features with the critical temperature
+corr_df <- as.data.frame(corr_matrix_2[, "critical_temp"])
+
+# Set the name of the column to "critical_temp"
+names(corr_df) <- c("critical_temp")
+
+# Add a column to store the absolute value of the "critical_temp" correlation coefficient
+corr_df['absolute_correlation'] = abs(corr_df[,"critical_temp"])
+
+```
+
+```{r}
+# Reduced set of features
+feature <- names(as.data.frame(t(corr_df)))
+
+# Correlation coeff with critical_temp
+coef <- corr_df[,"critical_temp"]
+
+# Dataframe of feature and correlation coeff
+feature_df <- data.frame(Feature = feature, Coef = coef )
+
+# Visualze the plot of features and its correlation with critical_temp
+ggplot(feature_df, aes(x = factor(Feature, levels = Feature), y = Coef)) + 
+    geom_bar(stat = "identity") + 
+    coord_flip() + 
+    xlab("Feature") + 
+    ylab("Correlation Coefficient")
+```
+
+* The features whose correlation with "Critical temperature" is greater than 0.1 are as follows.
+* There are 30 features relevant for predicting the "Critical temperature" of a super conductor. We will use these features for implementing the model.
+
+```{r}
+# Get the features whose absolute value of correlation with the critical_temp is > 0.1
+correlated_features_df <- as.data.frame(t(corr_df[corr_df[,"absolute_correlation"] > 0.1,]))
+
+# Get the names of those features
+names_of_features <- names(correlated_features_df)
+
+# Print the features whose absolute value of correlation with the critical_temp is > 0.1
+names(dplyr::select(correlated_features_df, -c("critical_temp")))
+```
+
+
+## Final subset of features
+
+* Create a dataframe which contains the final subset of features.
+* The final dataset obtained after the filteration step contains 30 features which are used for moel building.
+
+```{r}
+# Create a new dataframe of features whose correlation with the critical_temp is > 0.1
+train_4 <- select(train_3, names_of_features)
+
+# Visualize features whose correlation with the critical_temp is > 0.1
+ggcorr(dplyr::select(train_4, -c("critical_temp")))
+```
+
+
+\newpage
+# Wrapper Method
+
+Based on the features obtained from the Filter method, the wrapper method selects the best subset of features and train the model using them. Recursive feature elimination or step-wise feature selection is used to select the optimal subset of features.  
+
+The train() function from the *caret* package is used to perform the stepwise selection of features.In this method, the tuning parameter *nvmax* is used to obtain the optimum number of features to be incorporated in the model to obtain better predictions. Since we have 30 set of features, the range of nvmax is 1:30.
+
+The result of this function gives the optimum number of features to be incorporated in the model.
+
+## K-fold Cross validation
+
+* The trainControl() function controls the K-fold cross validation. 
+* In this method, 10-fold cross validation is used to estimate the average prediction error for every combination of predictors.
+
+
+```{r}
+# Set up repeated k-fold cross-validation
+train_control <- trainControl(method = "cv", number = 10)
+```
+
+## Step-wise feature selection
+
+* The "leapSeq" method to perform step-wise selection to fit linear regression.  
+
+
+```{r}
+# Set seed for reproducibility
+set.seed(123)
+
+# Train the model
+step.model <- train(critical_temp ~ ., 
+                    data = train_4,
+                    method = "leapSeq",
+                    tuneGrid = data.frame(nvmax = 1:30),
+                    trControl = train_control
+                    )
+
+# Model results
+model_result <- step.model$results
+```
+
+
+* The above model result is used to get the optimal number of features in the dataset.
+* From thhe below graph it is observes that th e optimal number of features is 20.
+
+
+```{r}
+# Plot Model accuracy
+ggplot(data=model_result, aes(x=nvmax, y=RMSE), ylim = c(0,100)) +
+    geom_line(color="red")+
+    geom_point() +
+    labs(x = "Number of variables", y = "RMSE")
+```
+
+```{r}
+# Select the best model with lowest RMSE (optimal number of variables)
+step.model$bestTune
+```
+
+
+* The best tune of the model is obtained at *nvmax* = 20. 
+* Therefore, the best 20 features to be incorporated in the model are as follows.
+* These features are the most appropriate ones for model devdelpoment.
+
+
+```{r}
+# Final model coefficients
+cat(names(coef(step.model$finalModel, 20)))
+```
+
+
+\newpage
+\section{Model Development}
+
+The features obtained from the feature reduction step are utilised for the development of model. In this section 3 types of models are developed including:
+
+* Linear Regression Model
+* Random Forest Model
+* Gradient Boosted Model
+
+## Linear Regression Model
+
+* The linear model is build using the 20 features obtained from the wrapper method of feature reduction step. 
+* The summary statistics show that the model has a significantly low p-value and a R2 value of 0.664 on the training set.
+
+
+```{r}
+# Get the linear model
+linear_model_1 <- lm(critical_temp ~ mean_atomic_mass + wtd_range_atomic_mass + std_atomic_mass + mean_fie + wtd_range_fie +
+                   mean_Density + gmean_ElectronAffinity + wtd_gmean_ElectronAffinity + wtd_entropy_ElectronAffinity +
+                   mean_FusionHeat + wtd_range_FusionHeat + std_FusionHeat + mean_ThermalConductivity + 
+                   wtd_gmean_ThermalConductivity + entropy_ThermalConductivity + wtd_range_ThermalConductivity +
+                   std_ThermalConductivity + O + Ba + Bi, 
+                data = train_4)
+
+summary(linear_model_1)
+```
+
+
+* Using this model to predict the "Critical temperature" of the superconductor on the test set gives an RMSE of 16.99 and R2 of 0.49.
+
+
+```{r}
+# Predict the "Critical temperature" using linear model
+predictions_lm1 <- predict(linear_model_1, test)
+
+# Model performance
+data.frame(
+  RMSE = RMSE(predictions_lm1, test$critical_temp),
+  R2 = R2(predictions_lm1, test$critical_temp)
+)
+```
+
+
+* The filteration method does not take into account the multicollinearity among the features in the model.
+* Hence, we identify the multicollinearity in the model using the VIF (Variance Inflation Factor).
+* The features having VIF >10 are highly collinear with the other parameters in the model and should be removed from the set of features.
+* The vif() function is used to find the Variance Inflation Factor of each feature.
+
+
+```{r}
+print(car::vif(linear_model_1))
+```
+
+
+* The features whose VIF>10 are removed and the summary statistics of the model are observed.
+* It seems that the residual standard error has increased slightly on the training set.
+* However, comparing the performance on the test datset, the R2 value has increased from 0.498 to 0.506.
+* Thus, the new linear model without the feature whose vif>10 has better performance of the training set.
+
+
+```{r}
+# Get the linear model
+linear_model_2 <- lm(critical_temp ~ mean_atomic_mass + wtd_range_atomic_mass + std_atomic_mass + mean_fie + wtd_range_fie +
+                   mean_Density + gmean_ElectronAffinity + wtd_gmean_ElectronAffinity + wtd_entropy_ElectronAffinity +
+                   mean_FusionHeat + wtd_range_FusionHeat + std_FusionHeat + mean_ThermalConductivity + 
+                   wtd_gmean_ThermalConductivity + entropy_ThermalConductivity + wtd_range_ThermalConductivity +
+                   O + Ba + Bi, 
+                data = train_4)
+
+summary(linear_model_2)
+```
+
+```{r}
+# Predict the "Critical temperature" using linear model
+predictions_lm2 <- predict(linear_model_2, test)
+
+# Model performance
+data.frame(
+  RMSE = RMSE(predictions_lm2, test$critical_temp),
+  R2 = R2(predictions_lm2, test$critical_temp)
+)
+```
+
+## Random Forest Model
+
+* Random Forest is another machine learning algoritm for performing regression tasks.
+* In thi step, a Random Forest model with default parameters is implemented on the training set.
+* The default number of trees in this case is 500 and the  number of variables in each split (mtry) is 6.
+
+
+```{r}
+set.seed(1234)
+
+# Default model
+model_rf1 <- randomForest(critical_temp ~ mean_atomic_mass + wtd_range_atomic_mass + std_atomic_mass + mean_fie + wtd_range_fie +
+                   mean_Density + gmean_ElectronAffinity + wtd_gmean_ElectronAffinity + wtd_entropy_ElectronAffinity +
+                   mean_FusionHeat + wtd_range_FusionHeat + std_FusionHeat + mean_ThermalConductivity +
+                   wtd_gmean_ThermalConductivity + entropy_ThermalConductivity + wtd_range_ThermalConductivity +
+                   std_ThermalConductivity + O + Ba + Bi, data = train_4)
+
+# Print the results
+print(model_rf1)
+```
+
+
+* The performance of the model is tested on the training set.
+* The model records an RMSE of 13.78 and R2 of 0.675.
+
+
+```{r}
+
+# Predict the RMSE using model 1
+RMSE_model_rf1 = RMSE(predict(model_rf1, test), test$critical_temp)
+
+# Predict the R-squared using model 1
+R2_model_rf1 = R2(predict(model_rf1, test), test$critical_temp)
+
+
+# Model performance
+data.frame(
+  RMSE = RMSE_model_rf1,
+  R2 =  R2_model_rf1
+)
+```
+
+## Tuning the parameters of Random Forest model
+
+* To tune the model, it is tested with the values of mtry from 1 to 10.
+* Observing the performance of the model for each value of mtry, the R2 value is maximum at mtry = 2.
+* Hence, it can be concluded that the optimum number of variables tried at each split is 2.
+
+```{r}
+set.seed(1234)
+
+# Number of variables sampled at each split
+mtry_seq <- c(2:10)
+
+# RMSE for each mtry
+RMSE = c()
+
+# R-squared for each mtry
+R2 = c()
+
+# Loop to search the best mtry
+for (each in mtry_seq)
+{
+    model_rf <- randomForest(critical_temp ~ mean_atomic_mass + wtd_range_atomic_mass + std_atomic_mass + mean_fie + wtd_range_fie +
+                   mean_Density + gmean_ElectronAffinity + wtd_gmean_ElectronAffinity + wtd_entropy_ElectronAffinity +
+                   mean_FusionHeat + wtd_range_FusionHeat + std_FusionHeat + mean_ThermalConductivity +
+                   wtd_gmean_ThermalConductivity + entropy_ThermalConductivity + wtd_range_ThermalConductivity +
+                   std_ThermalConductivity + O + Ba + Bi, data = train_4, ntree = 500, mtry = each)
+
+    # Predict the "Critical temperature" using linear model
+    predictions_rf <- predict(model_rf, test)
+
+    RMSE = c(RMSE, RMSE(predictions_rf, test$critical_temp))
+    R2 = c(R2, R2(predictions_rf, test$critical_temp))
+}
+```
+
+
+* Check the performance of the model.
+
+
+```{r}
+# Model performance
+rf_model_result <- data.frame(
+    mtry = mtry_seq,
+    RMSE = RMSE,
+    R2 = R2
+)
+
+# Visualize the Model performance
+ggplot(data=rf_model_result, aes(x=mtry, y=R2), ylim = c(0,1)) +
+    geom_line(color="blue")+
+    geom_point() +
+    labs(x = "Number of variables", y = "R-squared")
+```
+
+* The model with the highest R2 value is selected and it performance is tested.
+* It is observed that the value of R2 has improved from 0.675 to 0.684.
+
+```{r}
+set.seed(1293)
+
+# Model with features is chosen for each iteration (mtry = 2)
+model_rf2 <- randomForest(critical_temp ~ mean_atomic_mass + wtd_range_atomic_mass + std_atomic_mass + mean_fie + wtd_range_fie +
+                   mean_Density + gmean_ElectronAffinity + wtd_gmean_ElectronAffinity + wtd_entropy_ElectronAffinity +
+                   mean_FusionHeat + wtd_range_FusionHeat + std_FusionHeat + mean_ThermalConductivity +
+                   wtd_gmean_ThermalConductivity + entropy_ThermalConductivity + wtd_range_ThermalConductivity +
+                   std_ThermalConductivity + O + Ba + Bi, data = train_4, ntree = 500, mtry = 2)
+
+# Print the results
+print(model_rf2)
+```
+
+
+* The variable importance is used to identify the top 20 important features. 
+
+
+```{r}
+# To check important variables
+varImpPlot(model_rf2)
+```
+
+
+* Implement a random forest model with the top 20 important features and compare the performance of the models.
+* The second random forest model has the maximum value of R2 and is comparatively a better model.
+
+
+```{r}
+# Considering top 20 features to fine tune random forest
+top20_rf_features <- as.data.frame(t((importance(model_rf2, type = 1))))
+
+set.seed(1233)
+
+# Model with top 20 features
+model_rf3 <- randomForest(critical_temp ~ mean_atomic_mass + wtd_range_atomic_mass + std_atomic_mass +
+                             mean_fie + wtd_range_fie + mean_Density + gmean_ElectronAffinity + wtd_gmean_ElectronAffinity +
+                             wtd_entropy_ElectronAffinity + mean_FusionHeat + wtd_range_FusionHeat + std_FusionHeat +
+                             mean_ThermalConductivity + wtd_gmean_ThermalConductivity + entropy_ThermalConductivity +
+                             wtd_range_ThermalConductivity + std_ThermalConductivity + O + Ba + Bi, data = train_4, ntree = 500, mtry = 2)
+
+
+# Predict the RMSE using model 2
+RMSE_model_rf2 = RMSE(predict(model_rf2, test), test$critical_temp)
+
+# Predict the R-squared using model 2
+R2_model_rf2 = R2(predict(model_rf2, test), test$critical_temp)
+
+# Predict the RMSE using model 3
+RMSE_model_rf3 = RMSE(predict(model_rf3, test), test$critical_temp)
+
+# Predict the R-squared using model 3
+R2_model_rf3 = R2(predict(model_rf3, test), test$critical_temp)
+
+# Random forest model comparison
+rf_model_comparion <- data.frame(
+    Model = c(1:3),
+    RMSE = c(RMSE_model_rf1, RMSE_model_rf2, RMSE_model_rf3),
+    R2 = c(R2_model_rf1, R2_model_rf2, R2_model_rf3)
+)
+
+# Compare the performance of random forest models
+rf_model_comparion
+
+```
+
+## Gradient Boosted Modeling
+
+* In this model, R's GBM (Gradient Boosted Modeling) package is used to implement the boosting model.
+* The number of trees in GBM are smaller than the random forest.
+* This model uses *gaussian distribution* for the residual error loss.
+* The default number of trees are 10,000 and the learning rate is 0.01. Since there are 21,000+ observations, the interaction depth is set to 8.
+* The summary statistics of the model are as follows. It gives a variable importance plot for the gbm model.
+
+```{r}
+model_gbm = gbm(critical_temp ~ mean_atomic_mass + wtd_range_atomic_mass + std_atomic_mass + mean_fie + wtd_range_fie +
+                   mean_Density + gmean_ElectronAffinity + wtd_gmean_ElectronAffinity + wtd_entropy_ElectronAffinity +
+                   mean_FusionHeat + wtd_range_FusionHeat + std_FusionHeat + mean_ThermalConductivity + 
+                   wtd_gmean_ThermalConductivity + entropy_ThermalConductivity + wtd_range_ThermalConductivity +
+                   std_ThermalConductivity + O + Ba + Bi, 
+                   data = train_4, distribution = "gaussian", n.trees = 10000, shrinkage = 0.01, interaction.depth = 8)
+
+summary(model_gbm)
+```
+
+
+* Predicting the target variable on the test set using this model, the performance is tested for number of trees ranging from 100 to 10,000.
+* It can be observed from the boosting test error graph that the minimum test error is observed for number of trees = 1100. 
+
+
+```{r}
+# Sequence of number of trees
+n.trees = seq(from = 100, to = 10000, by = 100)
+
+# prediction matrix
+predmat = predict(model_gbm, newdata = test, n.trees = n.trees)
+
+# Boosting error graph
+boost.err = with(test, apply( (predmat - critical_temp)^2, 2, mean) )
+plot(n.trees, boost.err, ylab = "Mean Squared Error", xlab = "# Trees", main = "Boosting Test Error")
+abline(h = min(boost.err), col = "red")
+```
+
+
+* Check the number of trees corresponding to the minimun boosting error.
+
+
+```{r}
+# Dataframe to store error corresponding to the number of trees
+gbm_error <- data.frame(
+    Number_of_Trees = n.trees,
+    Test_Error = boost.err
+    
+)
+
+gbm_error[gbm_error$Test_Error == min(gbm_error[,"Test_Error"]), ] 
+```
+
+
+* Thus, the best gbm model is obtained for nummber of trees = 1100.
+* Check the performance of the model corresponding to n.tree = 1100.
+* The RMSE of the model is 13.665 and the r2 is 0.661.
+
+```{r}
+gbm_model2 <- gbm(critical_temp ~ mean_atomic_mass + wtd_range_atomic_mass + std_atomic_mass + mean_fie + wtd_range_fie +
+                   mean_Density + gmean_ElectronAffinity + wtd_gmean_ElectronAffinity + wtd_entropy_ElectronAffinity +
+                   mean_FusionHeat + wtd_range_FusionHeat + std_FusionHeat + mean_ThermalConductivity + 
+                   wtd_gmean_ThermalConductivity + entropy_ThermalConductivity + wtd_range_ThermalConductivity +
+                   std_ThermalConductivity + O + Ba + Bi, 
+                   data = train_4, distribution = "gaussian", n.trees = 1100, shrinkage = 0.01, interaction.depth = 8)
+
+# Model performance
+data.frame(
+  RMSE = RMSE(predict(gbm_model2, test, n.trees = 1100), test$critical_temp),
+  R2 = R2(predict(gbm_model2, test, n.trees = 1100), test$critical_temp)
+)
+```
+
+
+\newpage
+\section{Model Comparison}
+
+
+Three different types of regression models were implemented to perform regression analysis on the dataset of super conductors. The following models were implemented for predicting the "Critical temperature" of a super conductor:
+
+* Linear Model
+* Random Forest Model
+* Gradient Boosted Model
+
+The mertics used to compare the performance of the models was the RMSE value and the R2 score.
+
+**Performance metrics:**  
+
+```{r}
+# Model performance
+performance <- data.frame(
+  Model = c("Linear Model", "Random Forest", "Gradient Boosted Model"),
+  RMSE = c(RMSE(predictions_lm2, test$critical_temp), RMSE_model_rf2, RMSE(predict(gbm_model2, test, n.trees = 1100), test$critical_temp)),
+  R2 = c(R2(predictions_lm2, test$critical_temp), R2_model_rf2, R2(predict(gbm_model2, test, n.trees = 1100), test$critical_temp))
+)
+
+# Print model performance
+performance
+```
+
+* From the above comparison, the random forest model has the best metrics for RMSE as well as R2. The random forest model has the lowest root mean square and has the highest R2 score. 
+* Hence it is the best model amongst all.
+* The second best performing model is the gradient boosted model with an RMSE of 13.63 and R2 of 0.66.
+* The linear model is the least performing model among the 3. with RMSE of 16.85935 and R2 of 0.5059919.  
+
+
+\newpage
+\section{Conclusion}
+
+* Regression models were successfully created to predict the critical temperature of superconductors using features derived from the properties of the elements in the superconductors. 
+
+* The initial dataset contained 80 features. These features were combined with the elements to infer the most dominant elements in the superconductors and their correlation to the Critical temperature.
+
+* The total number of features was 167 which were reduced to a final subset of 20 significant features. The filter and wrapper feature reduction techniques were used to reduce the features.
+
+* The final set of features used for predicting the critical temperature are: *mean_atomic_mass, wtd_range_atomic_mass, std_atomic_mass, mean_fie, wtd_range_fie, mean_Density, gmean_ElectronAffinity, wtd_gmean_ElectronAffinity, wtd_entropy_ElectronAffinity, mean_FusionHeat, wtd_range_FusionHeat, std_FusionHeat, mean_ThermalConductivity, wtd_gmean_ThermalConductivity, entropy_ThermalConductivity, wtd_range_ThermalConductivity, std_ThermalConductivity, O, Ba, Bi*.
+
+* Three regression models were implemented for the regression task including the linear model, random forest model and the gradient boosted model.
+
+* Comparing the performance of the 3 models, the random forest model has the best performance metrics.
+
+* The Best model has **RMSE: 13.50** and **R2: 0.68**.
+
+
+\newpage
+\section{Reference}
+
+1.	https://towardsdatascience.com/why-how-and-when-to-apply-feature-selection-e9c69adfabf2
+
+2.	http://rpubs.com/Mentors_Ubiqum/Zero_Variance
+
+3.	https://campus.datacamp.com/courses/machine-learning-toolbox/preprocessing-your-data?ex=13
+
+4.	https://www.rdocumentation.org/packages/caret/versions/6.0-84/topics/findCorrelation
+
+5.	https://machinelearningmastery.com/feature-selection-with-the-caret-r-package/
+
+6.	https://rpubs.com/sediaz/Correlations
+
+7.	http://www.sthda.com/english/articles/37-model-selection-essentials-in-r/154-stepwise-regression-essentials-in-r/
+
+8.	http://www.sthda.com/english/articles/39-regression-model-diagnostics/160-multicollinearity-essentials-and-vif-in-r/
+
+9.	https://www.analyticsvidhya.com/blog/2016/12/introduction-to-feature-selection-methods-with-an-example-or-how-to-select-the-right-variables/
+
+10.	https://www.r-bloggers.com/how-to-implement-random-forests-in-r/
+
+11.	https://www.datacamp.com/community/tutorials/decision-trees-R
+
